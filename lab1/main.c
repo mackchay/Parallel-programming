@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <mpi.h>
 
 void init(double *A, double *b, double *x, int N) {
     for (size_t i = 0; i < N * N; i++) {
@@ -62,24 +63,39 @@ void vectorCalculation(double *A, double *b, double *x, int N) {
     free(Ax);
 }
 
-int main() {
-    int N = 10;
-    double *A = malloc(N * N * sizeof(double *));
-
-    double *b = malloc(N * sizeof(double));
-    double *x = malloc(N * sizeof(double));
-    init(A, b, x, N);
-    vectorCalculation(A, b, x, N);
-
+void printVector(double *x, int N) {
     printf("x = ( ");
     for (size_t i = 0; i < N; i++) {
         printf("%.3lf ", x[i]);
     }
     printf(")");
+}
+
+int main(int argc, char* argv[]) {
+
+    int errCode;
+    if ((errCode = MPI_Init(&argc, &argv)) != 0)
+    {
+        return errCode;
+    }
+
+
+    int N = 15;
+    double *A = malloc(N * N * sizeof(double *));
+
+    double *b = malloc(N * sizeof(double));
+    double *x = malloc(N * sizeof(double));
+
+    init(A, b, x, N);
+    vectorCalculation(A, b, x, N);
+    printVector(x, N);
+
 
     free(A);
     free(b);
     free(x);
+
+    MPI_Finalize();
 
     return 0;
 }
