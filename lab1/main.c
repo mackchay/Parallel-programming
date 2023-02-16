@@ -1,20 +1,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <mpi.h>
+#include <math.h>
 #include <time.h>
 
 #define RANK_ROOT 0
 #define TAG 0
+#define EPSILON 0.000000001
 
 void init(double *A, double *b, double *x, int N) {
-    for (size_t i = 0; i < N * N; i++) {
+    for (int i = 0; i < N * N; i++) {
         if (i % (N + 1) == 0) {
             A[i] = 2.0;
         } else {
             A[i] = 1.0;
         }
     }
-    for (size_t i = 0; i < N; i++) {
+    for (int i = 0; i < N; i++) {
         x[i] = 0;
         b[i] = N + 1;
     }
@@ -22,14 +24,14 @@ void init(double *A, double *b, double *x, int N) {
 
 
 void vector_sub(double *a, double *b, double *result, int N) {
-    for (size_t i = 0; i < N; i++) {
+    for (int i = 0; i < N; i++) {
         result[i] = a[i] - b[i];
     }
 }
 
 
 void mul_on_scalar(double *a, double number, int N) {
-    for (size_t i = 0; i < N; i++) {
+    for (int i = 0; i < N; i++) {
         a[i] = number * a[i];
     }
 }
@@ -37,7 +39,7 @@ void mul_on_scalar(double *a, double number, int N) {
 
 void print_vector(double *x, int N) {
     printf("x = ( ");
-    for (size_t i = 0; i < N; i++) {
+    for (int i = 0; i < N; i++) {
         printf("%.3lf ", x[i]);
     }
     printf(")\n");
@@ -50,24 +52,27 @@ void matrix_vector_mul(double *A, double *x, double *result, int N) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     //Multiplication of rows of matrices corresponding to processes by a vector
-    for (size_t i = rank * (N / size); i < rank * N / size + N / size; i++) {
+    for (int i = rank * (N / size); i < rank * N / size + N / size; i++) {
         result[i] = 0;
-        for (size_t j = 0; j < N; j++) {
+        for (int j = 0; j < N; j++) {
             result[i] += A[i * N + j] * x[j];
         }
     }
-    MPI_Send(result + rank * (N / size), N / size, MPI_DOUBLE, RANK_ROOT, TAG, MPI_COMM_WORLD);
+    if (rank != RANK_ROOT) {
+        MPI_Send(result + rank * (N / size), N / size, MPI_DOUBLE,
+                 RANK_ROOT, TAG, MPI_COMM_WORLD);
+    }
 
     //Root process accepts values from other processors
     if (rank == RANK_ROOT) {
-        for (int other_rank = 0; other_rank < size; other_rank++) {
+        for (int other_rank = RANK_ROOT + 1; other_rank < size; other_rank++) {
             MPI_Recv(result + other_rank * (N / size), N / size, MPI_DOUBLE, other_rank, TAG, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
         }
         //Work with remaining unallocated part by processes.
-        for (size_t i = N - N % size - 1; i < N; i++) {
+        for (int i = N - N % size; i < N; i++) {
             result[i] = 0;
-            for (size_t j = 0; j < N; j++) {
+            for (int j = 0; j < N; j++) {
                 result[i] += A[i * N + j] * x[j];
             }
         }
@@ -78,20 +83,20 @@ void matrix_vector_mul(double *A, double *x, double *result, int N) {
 
 double scalar(double *a, int N) {
     double result = 0.0;
-    for (size_t i = 0; i < N; i++) {
+    for (int i = 0; i < N; i++) {
         result += a[i] * a[i];
     }
-    return result;
+
+    return sqrt(result);
 }
 
 
 void vector_calculation(double *A, double *b, double *x, int N) {
     double t = 0.01;
-    double e = 0.00001;
-    double criteria = e + 1.0;
-    double *Ax = malloc(N * sizeof(double));
-    double *num = malloc(N * sizeof(double));
-    while (criteria >= e) {
+    double criteria = (EPSILON) + 1.0;
+    double *Ax = calloc(N, sizeof(double));
+    double *num = calloc(N, sizeof(double));
+    while (criteria >= EPSILON) {
         matrix_vector_mul(A, x, Ax, N);
         vector_sub(Ax, b, num, N);
         criteria = scalar(num, N) / scalar(b, N);
@@ -105,16 +110,16 @@ void vector_calculation(double *A, double *b, double *x, int N) {
 
 int main(int argc, char* argv[]) {
 
-    int errCode, rank, N = 1000;
+    int errCode, rank, N = 200;
     if ((errCode = MPI_Init(&argc, &argv)) != 0)
     {
         return errCode;
     }
     clock_t begin, end;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    double *A = malloc(N * N * sizeof(double));
-    double *b = malloc(N * sizeof(double));
-    double *x = malloc(N * sizeof(double));
+    double *A = calloc(N * N, sizeof(double));
+    double *b = calloc(N, sizeof(double));
+    double *x = calloc(N, sizeof(double));
 
     begin = clock();
     init(A, b, x, N);
