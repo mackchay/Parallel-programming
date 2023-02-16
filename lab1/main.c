@@ -1,8 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <mpi.h>
+#include <time.h>
 
-#define ROOT 0
+#define RANK_ROOT 0
+#define TAG 0
 
 void init(double *A, double *b, double *x, int N) {
     for (size_t i = 0; i < N * N; i++) {
@@ -53,15 +55,15 @@ void matrix_vector_mul(double *A, double *x, double *result, int N) {
             result[i] += A[i * N + j] * x[j];
         }
     }
-    MPI_Send(result + rank * (N / size), N / size, MPI_DOUBLE, ROOT, 0, MPI_COMM_WORLD);
+    MPI_Send(result + rank * (N / size), N / size, MPI_DOUBLE, RANK_ROOT, TAG, MPI_COMM_WORLD);
     //printf("Process %d send information\n", rank);
-    if (rank == ROOT) {
+    if (rank == RANK_ROOT) {
         for (int i = 0; i < size; i++) {
-            MPI_Recv(result + i * (N / size), N / size, MPI_DOUBLE, i, 0, MPI_COMM_WORLD,
+            MPI_Recv(result + i * (N / size), N / size, MPI_DOUBLE, i, TAG, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
             //printf("From process %d received data.\n", i);
         }
-        for (int i = N - N % size - 1; i < N; i++) {
+        for (size_t i = N - N % size - 1; i < N; i++) {
             result[i] = 0;
             for (size_t j = 0; j < N; j++) {
                 result[i] += A[i * N + j] * x[j];
@@ -69,7 +71,7 @@ void matrix_vector_mul(double *A, double *x, double *result, int N) {
         }
     }
 
-    MPI_Bcast(result, N, MPI_DOUBLE, ROOT, MPI_COMM_WORLD);
+    MPI_Bcast(result, N, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 }
 
 
@@ -108,20 +110,25 @@ int main(int argc, char* argv[]) {
         return errCode;
     }
 
+
+    clock_t begin, end;
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    int N = 10;
+    int N = 10000;
     double *A = malloc(N * N * sizeof(double));
 
     double *b = malloc(N * sizeof(double));
     double *x = malloc(N * sizeof(double));
 
+    begin = clock();
     init(A, b, x, N);
     vector_calculation(A, b, x, N);
 
-    if (rank == ROOT) {
+    if (rank == RANK_ROOT) {
         print_vector(x, N);
+        end = clock();
+        printf("The elapsed time is %lf seconds", (double)(end - begin) / CLOCKS_PER_SEC);
     }
 
 
