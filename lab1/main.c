@@ -49,6 +49,7 @@ void matrix_vector_mul(double *A, double *x, double *result, int N) {
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+    //Multiplication of rows of matrices corresponding to processes by a vector
     for (size_t i = rank * (N / size); i < rank * N / size + N / size; i++) {
         result[i] = 0;
         for (size_t j = 0; j < N; j++) {
@@ -56,13 +57,14 @@ void matrix_vector_mul(double *A, double *x, double *result, int N) {
         }
     }
     MPI_Send(result + rank * (N / size), N / size, MPI_DOUBLE, RANK_ROOT, TAG, MPI_COMM_WORLD);
-    //printf("Process %d send information\n", rank);
+
+    //Root process accepts values from other processors
     if (rank == RANK_ROOT) {
-        for (int i = 0; i < size; i++) {
-            MPI_Recv(result + i * (N / size), N / size, MPI_DOUBLE, i, TAG, MPI_COMM_WORLD,
+        for (int other_rank = 0; other_rank < size; other_rank++) {
+            MPI_Recv(result + other_rank * (N / size), N / size, MPI_DOUBLE, other_rank, TAG, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
-            //printf("From process %d received data.\n", i);
         }
+        //Work with remaining unallocated part by processes.
         for (size_t i = N - N % size - 1; i < N; i++) {
             result[i] = 0;
             for (size_t j = 0; j < N; j++) {
@@ -70,7 +72,6 @@ void matrix_vector_mul(double *A, double *x, double *result, int N) {
             }
         }
     }
-
     MPI_Bcast(result, N, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 }
 
@@ -104,39 +105,29 @@ void vector_calculation(double *A, double *b, double *x, int N) {
 
 int main(int argc, char* argv[]) {
 
-    int errCode;
+    int errCode, rank, N = 1000;
     if ((errCode = MPI_Init(&argc, &argv)) != 0)
     {
         return errCode;
     }
-
-
     clock_t begin, end;
-    int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-    int N = 10000;
     double *A = malloc(N * N * sizeof(double));
-
     double *b = malloc(N * sizeof(double));
     double *x = malloc(N * sizeof(double));
 
     begin = clock();
     init(A, b, x, N);
     vector_calculation(A, b, x, N);
-
     if (rank == RANK_ROOT) {
         print_vector(x, N);
         end = clock();
         printf("The elapsed time is %lf seconds", (double)(end - begin) / CLOCKS_PER_SEC);
     }
 
-
     free(A);
     free(b);
     free(x);
-
     MPI_Finalize();
-
     return 0;
 }
