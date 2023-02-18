@@ -6,7 +6,7 @@
 
 #define RANK_ROOT 0
 #define TAG 0
-#define EPSILON 0.000000001
+#define EPSILON 0.00001
 
 void init(double *A, double *b, double *x, int N) {
     for (int i = 0; i < N * N; i++) {
@@ -92,7 +92,7 @@ double scalar(double *a, int N) {
 
 
 void vector_calculation(double *A, double *b, double *x, int N) {
-    double t = 0.01;
+    double t = 0.0001;
     double criteria = (EPSILON) + 1.0;
     double *Ax = calloc(N, sizeof(double));
     double *num = calloc(N, sizeof(double));
@@ -110,24 +110,24 @@ void vector_calculation(double *A, double *b, double *x, int N) {
 
 int main(int argc, char* argv[]) {
 
-    int errCode, rank, N = 200;
+    int errCode, rank, N = 18800;
     if ((errCode = MPI_Init(&argc, &argv)) != 0)
     {
         return errCode;
     }
-    clock_t begin, end;
+    double begin, end;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     double *A = calloc(N * N, sizeof(double));
     double *b = calloc(N, sizeof(double));
     double *x = calloc(N, sizeof(double));
 
-    begin = clock();
+    begin = MPI_Wtime();
     init(A, b, x, N);
     vector_calculation(A, b, x, N);
+    end = MPI_Wtime();
     if (rank == RANK_ROOT) {
         print_vector(x, N);
-        end = clock();
-        printf("The elapsed time is %lf seconds", (double)(end - begin) / CLOCKS_PER_SEC);
+        printf("The elapsed time is %lf seconds", end - begin);
     }
 
     free(A);
