@@ -2,11 +2,11 @@
 #include <stdlib.h>
 #include <mpi.h>
 #include <math.h>
-#include <time.h>
 
 #define RANK_ROOT 0
 #define TAG 0
-#define EPSILON 0.00001
+#define EPSILON 0.00000001
+#define TAU 0.0001
 
 void init(double *A, double *b, double *x, int N) {
     for (int i = 0; i < N * N; i++) {
@@ -81,7 +81,7 @@ void matrix_vector_mul(double *A, double *x, double *result, int N) {
 }
 
 
-double scalar(double *a, int N) {
+double euclidean_norm(double *a, int N) {
     double result = 0.0;
     for (int i = 0; i < N; i++) {
         result += a[i] * a[i];
@@ -92,25 +92,22 @@ double scalar(double *a, int N) {
 
 
 void vector_calculation(double *A, double *b, double *x, int N) {
-    double t = 0.0001;
     double criteria = (EPSILON) + 1.0;
     double *Ax = calloc(N, sizeof(double));
-    double *num = calloc(N, sizeof(double));
     while (criteria >= EPSILON) {
         matrix_vector_mul(A, x, Ax, N);
-        vector_sub(Ax, b, num, N);
-        criteria = scalar(num, N) / scalar(b, N);
-        mul_on_scalar(num, t, N);
-        vector_sub(x, num, x, N);
+        vector_sub(Ax, b, Ax, N);
+        criteria = euclidean_norm(Ax, N) / euclidean_norm(b, N);
+        mul_on_scalar(Ax, TAU, N);
+        vector_sub(x, Ax, x, N);
     }
-    free(num);
     free(Ax);
 }
 
 
 int main(int argc, char* argv[]) {
 
-    int errCode, rank, N = 18800;
+    int errCode, rank, N = 18880;
     if ((errCode = MPI_Init(&argc, &argv)) != 0)
     {
         return errCode;
