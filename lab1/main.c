@@ -5,13 +5,13 @@
 
 #define RANK_ROOT 0
 #define TAG 0
-#define EPSILON 0.00001
-#define TAU 0.01
+#define EPSILON 0.0000001
+#define TAU 0.0001
 
 void init(double *A, double *b, int N) {
     for (int i = 0; i < N * N; i++) {
         if (i % (N + 1) == 0) {
-            A[i] = 2.0;
+            A[i] = 12000.0;
         } else {
             A[i] = 1.0;
         }
@@ -45,11 +45,13 @@ void print_vector(double *x, int N) {
 }
 
 
-void matrix_vector_mul(double *A, double *x, double *result, int N) {
+void matrix_vector_mul(double *A, double *x, double *result, int matrix_size, int vector_size) {
     //Multiplication of rows of matrices corresponding to processes by a vector
-        for (int i = 0; i < N; i++) {
-            result[i] += A[i] * x[i];
+    for (int i = 0; i < matrix_size; i++) {
+        for (int j = 0; j < vector_size; j++) {
+            result[i] += A[i * matrix_size + j] * x[j];
         }
+    }
 }
 
 
@@ -80,7 +82,7 @@ void vector_calculation(double *A, double *b, double *x, int N) {
     while (criteria >= EPSILON) {
         MPI_Scatter(Ax, N / size, MPI_DOUBLE, AxBuf, N / size,
                     MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
-        matrix_vector_mul(ABuf, x, AxBuf, N * (N / size));
+        matrix_vector_mul(ABuf, x, AxBuf, N / size, N);
         vector_sub(AxBuf, b, AxBuf, N / size);
         MPI_Allgather(AxBuf, N / size, MPI_DOUBLE, Ax, N / size,
                       MPI_DOUBLE, MPI_COMM_WORLD);
@@ -90,6 +92,8 @@ void vector_calculation(double *A, double *b, double *x, int N) {
             mul_on_scalar(Ax, TAU, N);
             vector_sub(x, Ax, x, N);
         }
+
+        MPI_Bcast(&criteria, 1, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
         MPI_Bcast(x, N, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
         MPI_Barrier(MPI_COMM_WORLD);
     }
@@ -101,16 +105,18 @@ void vector_calculation(double *A, double *b, double *x, int N) {
 
 int main(int argc, char* argv[]) {
 
-    int errCode, rank, N = 100;
+    int errCode, rank, N = 7752;
     if ((errCode = MPI_Init(&argc, &argv)) != 0)
     {
         return errCode;
     }
     double begin, end;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
     double *A = NULL;
     double *b = calloc(N, sizeof(double));
     double *x = calloc(N, sizeof(double));
+
 
     if (rank == RANK_ROOT) {
         A = calloc(N * N, sizeof (double));
