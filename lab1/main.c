@@ -4,14 +4,13 @@
 #include <math.h>
 
 #define RANK_ROOT 0
-#define TAG 0
-#define EPSILON 0.0000001
+#define EPSILON 0.000000000000000001
 #define TAU 0.0001
 
 void init(double *A, double *b, int N) {
     for (int i = 0; i < N * N; i++) {
         if (i % (N + 1) == 0) {
-            A[i] = 12000.0;
+            A[i] = 2.0;
         } else {
             A[i] = 1.0;
         }
@@ -79,15 +78,21 @@ void vector_calculation(double *A, double *b, double *x, int N) {
     MPI_Bcast(x, N, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
     MPI_Scatter(A, N * (N / size), MPI_DOUBLE, ABuf, N * (N / size),
                     MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
+
     while (criteria >= EPSILON) {
         MPI_Scatter(Ax, N / size, MPI_DOUBLE, AxBuf, N / size,
                     MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
         matrix_vector_mul(ABuf, x, AxBuf, N / size, N);
-        vector_sub(AxBuf, b, AxBuf, N / size);
+
+        if (rank == RANK_ROOT) {
+            matrix_vector_mul(A + N * N - N % size * N, x, Ax + N - N % size,
+                              N % size, N);
+        }
         MPI_Allgather(AxBuf, N / size, MPI_DOUBLE, Ax, N / size,
                       MPI_DOUBLE, MPI_COMM_WORLD);
 
         if (rank == RANK_ROOT) {
+            vector_sub(Ax, b, Ax, N);
             criteria = euclidean_norm(Ax, N) / euclidean_norm(b, N);
             mul_on_scalar(Ax, TAU, N);
             vector_sub(x, Ax, x, N);
@@ -105,10 +110,10 @@ void vector_calculation(double *A, double *b, double *x, int N) {
 
 int main(int argc, char* argv[]) {
 
-    int errCode, rank, N = 7752;
-    if ((errCode = MPI_Init(&argc, &argv)) != 0)
+    int err_code, rank, N = 12001;
+    if ((err_code = MPI_Init(&argc, &argv)) != 0)
     {
-        return errCode;
+        return err_code;
     }
     double begin, end;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
