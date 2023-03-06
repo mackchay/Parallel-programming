@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="6ba0e4f2-d87f-4690-a464-449604771b11" name="clu.nusc.ru">
+        <fileTransfer rootFolder="/mnt/storage/home/hpcusers/hpcuser243" accessType="SFTP" host="clu.nusc.ru" port="22" sshConfigId="4b2216b3-3915-447a-97aa-43c5c894cb56" sshConfig="hpcuser243@clu.nusc.ru:22 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>

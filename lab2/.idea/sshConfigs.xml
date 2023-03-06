@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SshConfigs">
+    <configs>
+      <sshConfig authType="PASSWORD" host="clu.nusc.ru" id="4b2216b3-3915-447a-97aa-43c5c894cb56" port="22" nameFormat="DESCRIPTIVE" username="hpcuser243" useOpenSSHConfig="true" />
+    </configs>
+  </component>
+</project>
