@@ -100,7 +100,6 @@ void vector_calculation(double *A, double *b, double *x, int N) {
 
         MPI_Bcast(&criteria, 1, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
         MPI_Bcast(x, N, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
-        MPI_Barrier(MPI_COMM_WORLD);
     }
     free(Ax);
     free(AxBuf);
