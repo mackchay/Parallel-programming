@@ -9,5 +9,5 @@ set(CMAKE_CXX_COMPILER "/usr/bin/g++")
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fopenmp -Werror -Wall -Wextra -Wpedantic")
 
-add_executable(lab2 main.c)
+add_executable(lab2 main1.c)
 target_link_libraries(lab2 m)

@@ -24,7 +24,6 @@ void init(double *A, double *b, int N) {
 
 void vector_sub(double *a, double *b, double *result, int N) {
     int i;
-#pragma omp parallel for
     for (i = 0; i < N; i++) {
         result[i] = a[i] - b[i];
     }
@@ -33,7 +32,6 @@ void vector_sub(double *a, double *b, double *result, int N) {
 
 void mul_on_scalar(double *a, double number, int N) {
     int i;
-#pragma omp parallel for
     for (i = 0; i < N; i++) {
         a[i] = number * a[i];
     }
@@ -53,7 +51,6 @@ void print_vector(double *x, int N) {
 void matrix_vector_mul(double *A, double *x, double *result, int matrix_size, int vector_size) {
     //Multiplication of rows of matrices corresponding to processes by a vector
     int i, j;
-#pragma omp parallel for private(j)
     for (i = 0; i < matrix_size; i++) {
         for (j = 0; j < vector_size; j++) {
             result[i] += A[i * matrix_size + j] * x[j];
@@ -63,14 +60,14 @@ void matrix_vector_mul(double *A, double *x, double *result, int matrix_size, in
 
 
 double euclidean_norm(double *a, int N) {
-    double result = 0.0;
-    int i = 0;
-#pragma omp parallel for reduction(+:result)
+    double result;
+    result = 0.0;
+    int i;
     for (i = 0; i < N; i++) {
         result += a[i] * a[i];
     }
-
-    return sqrt(result);
+    result = sqrt(result);
+    return result;
 }
 
 
@@ -78,14 +75,44 @@ void vector_calculation(double *A, double *b, double *x, int N) {
 
     double criteria = (EPSILON) + 1.0;
     double *Ax = calloc(N, sizeof(double));
+    double norm = euclidean_norm(Ax, N);
+    double norm_b = euclidean_norm(b, N);
+    int i, j;
+#pragma omp parallel private(i, j)
+    {
+        while (criteria >= EPSILON) {
+#pragma omp parallel for shared(Ax, A) private(j)
+            for (i = 0; i < N; i++) {
+                for (j = 0; j < N; j++) {
+                    Ax[i] += A[i * N + j] * x[j];
+                }
+            }
+#pragma omp parallel for shared(Ax) private(j)
+            for (i = 0; i < N; i++) {
+                Ax[i] = Ax[i] - b[i];
+            }
+#pragma omp atomic write
+            norm = 0;
 
-    while (criteria >= EPSILON) {
-        matrix_vector_mul(A, x, Ax, N, N);
+#pragma omp parallel for shared(Ax) reduction (+:norm)
+            for (i = 0; i < N; i++) {
+                norm += Ax[i] * Ax[i];
+            }
 
-        vector_sub(Ax, b, Ax, N);
-        criteria = euclidean_norm(Ax, N) / euclidean_norm(b, N);
-        mul_on_scalar(Ax, TAU, N);
-        vector_sub(x, Ax, x, N);
+#pragma omp atomic write
+            norm = sqrt(norm);
+
+#pragma omp parallel for shared(Ax)
+            for (i = 0; i < N; i++) {
+                Ax[i] = TAU * Ax[i];
+            }
+#pragma omp parallel for
+            for (i = 0; i < N; i++) {
+                x[i] = Ax[i] - x[i];
+            }
+#pragma omp critical
+            criteria = norm / norm_b;
+        }
     }
     free(Ax);
 }
@@ -93,7 +120,7 @@ void vector_calculation(double *A, double *b, double *x, int N) {
 
 int main(void) {
 
-    int N = 13200;
+    int N = 200;
     double start_time, end_time;
 
     double *A = NULL;
@@ -109,9 +136,10 @@ int main(void) {
     end_time = omp_get_wtime();
 
     print_vector(x, N);
-    printf("Time proceeds: %lf\n", end_time - start_time);
+    printf("Time proceeds: %lf", end_time - start_time);
     free(A);
     free(b);
     free(x);
     return 0;
 }
+
