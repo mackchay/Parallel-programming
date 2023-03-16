@@ -23,7 +23,7 @@ void init(double *A, double *b, int N) {
 
 
 void vector_sub(double *a, double *b, double *result, int N) {
-#pragma omp parallel for default(none) shared(N, a, b, result)
+#pragma omp for
     for (int i = 0; i < N; i++) {
         result[i] = a[i] - b[i];
     }
@@ -31,7 +31,7 @@ void vector_sub(double *a, double *b, double *result, int N) {
 
 
 void mul_on_scalar(double *a, double number, int N) {
-#pragma omp parallel for default(none) shared(N, number, a)
+#pragma omp for
     for (int i = 0; i < N; i++) {
         a[i] = number * a[i];
     }
@@ -50,7 +50,7 @@ void print_vector(double *x, int N) {
 
 void matrix_vector_mul(double *A, double *x, double *result, int matrix_size, int vector_size) {
     //Multiplication of rows of matrices corresponding to processes by a vector
-#pragma omp parallel for default(none) shared(matrix_size, vector_size, result, A, x)
+#pragma omp for schedule(static, matrix_size / omp_get_num_threads())
     for (int i = 0; i < matrix_size; i++) {
         for (int j = 0; j < vector_size; j++) {
             result[i] += A[i * matrix_size + j] * x[j];

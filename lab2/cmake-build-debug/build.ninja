@@ -49,8 +49,8 @@ cmake_ninja_workdir = /home/egor/CLionProjects/OPP/lab2/cmake-build-debug/
 
 build cmake_object_order_depends_target_lab2: phony || CMakeFiles/lab2.dir
 
-build CMakeFiles/lab2.dir/main.c.o: C_COMPILER__lab2_Debug /home/egor/CLionProjects/OPP/lab2/main.c || cmake_object_order_depends_target_lab2
-  DEP_FILE = CMakeFiles/lab2.dir/main.c.o.d
+build CMakeFiles/lab2.dir/main1.c.o: C_COMPILER__lab2_Debug /home/egor/CLionProjects/OPP/lab2/main1.c || cmake_object_order_depends_target_lab2
+  DEP_FILE = CMakeFiles/lab2.dir/main1.c.o.d
   FLAGS = -fopenmp -Werror -Wall -Wextra -Wpedantic -g -fdiagnostics-color=always -std=gnu99
   INCLUDES = -I/usr/include/x86_64-linux-gnu/mpich
   OBJECT_DIR = CMakeFiles/lab2.dir
@@ -64,7 +64,7 @@ build CMakeFiles/lab2.dir/main.c.o: C_COMPILER__lab2_Debug /home/egor/CLionProje
 #############################################
 # Link the executable lab2
 
-build lab2: C_EXECUTABLE_LINKER__lab2_Debug CMakeFiles/lab2.dir/main.c.o
+build lab2: C_EXECUTABLE_LINKER__lab2_Debug CMakeFiles/lab2.dir/main1.c.o
   FLAGS = -fopenmp -Werror -Wall -Wextra -Wpedantic -g
   LINK_LIBRARIES = -lm
   OBJECT_DIR = CMakeFiles/lab2.dir

@@ -51,7 +51,7 @@ void print_vector(double *x, int N) {
 
 void matrix_vector_mul(double *A, double *x, double *result, int matrix_size, int vector_size) {
     //Multiplication of rows of matrices corresponding to processes by a vector
-#pragma omp parallel for default(none) shared(result, matrix_size, vector_size, A, x)
+#pragma omp parallel for default(none) schedule(static, matrix_size / omp_get_num_threads()) shared(result, matrix_size, vector_size, A, x)
     for (int i = 0; i < matrix_size; i++) {
         for (int j = 0; j < vector_size; j++) {
             result[i] += A[i * matrix_size + j] * x[j];
