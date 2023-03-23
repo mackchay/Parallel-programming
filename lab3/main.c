@@ -1,12 +1,9 @@
-#include <omp.h>
+#include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
+#define RANK_ROOT 0
 
-#define EPSILON 0.0000000000000001
-#define TAU 0.0001
-
-void init(double *A, double *B, double *C, int A_size, int AB_size, int B_size) {
+void init(double *A, double *B, int A_size, int AB_size, int B_size) {
     for (int i = 0; i < A_size; i++) {
         for (int j = 0; j < AB_size; j++) {
             if (i == j) {
@@ -48,7 +45,7 @@ void print_matrix(double *x, int A_size, int B_size) {
 
     for (int i = 0; i < A_size; i++) {
         printf("( ");
-        for (int j; j < B_size; j++) {
+        for (int j = 0; j < B_size; j++) {
             printf("%.3lf ", x[i * A_size + j]);
         }
         printf(")\n");
@@ -88,23 +85,34 @@ void matrix_calculation(double *A, double *B, double *C, int A_size, int AB_size
 
 int main(void) {
 
-    int N = 14320;
-    int A_size = 10, AB_size = 15, B_size = 20;
+    MPI_Init(NULL, NULL);
+    int A_size = 5, AB_size = 3, B_size = 2;
     double start_time, end_time;
+    int rank;
+    double *A = NULL;
+    double *B = NULL;
+    double *C = NULL;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    if (rank == RANK_ROOT) {
+        A = calloc(A_size * AB_size, sizeof(double));
+        B = calloc(AB_size * B_size, sizeof(double));
+        C = calloc(A_size * B_size, sizeof(double));
+    }
 
-    double *A = calloc(A_size * AB_size, sizeof(double));
-    double *B = calloc(AB_size * B_size, sizeof(double));
-    double *C = calloc(A_size * B_size, sizeof(double));;
-    init(A, B, C, A_size, AB_size, B_size);
-//    start_time = omp_get_wtime();
-    matrix_calculation(A, B, C, A_size, AB_size, B_size);
-//    end_time = omp_get_wtime();
+    for (int i = 0; i < 5; i++) {
+        if (rank == RANK_ROOT) {
+            init(A, B, A_size, AB_size, B_size);
+        }
+        start_time = MPI_Wtime();
+        matrix_calculation(A, B, C, A_size, AB_size, B_size);
+        end_time = MPI_Wtime();
+        printf("Time proceeds: %lf\n", end_time - start_time);
+    }
 
     print_matrix(C, A_size, B_size);
-    printf("Time proceeds: %lf\n", end_time - start_time);
+    MPI_Finalize();
     free(A);
     free(B);
     free(C);
     return 0;
 }
-
