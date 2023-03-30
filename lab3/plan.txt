@@ -1,0 +1,7 @@
+Multiplication matrices algorithm with using 2d grid plan:
+
+1. Init 2 matrices as usual array.
+2. Init matrix entity (i'm using Mpi_cart_create).
+3. Split the matrix into processes row by row.
+4. Split the matrix into processes column by column.
+5.
