@@ -67,7 +67,7 @@ void make_null(Mat *C) {
     }
 }
 
-void gather_blocks(Mat *A, Mat *B, Mat *C, Mat *C_block, MPI_Comm comm_2d,
+void gather_blocks(Mat *C, Mat *C_block, MPI_Comm comm_2d,
                   const int *dims, int *coords, int process_num) {
     MPI_Datatype block, block_resized;
     MPI_Type_vector(A_ROWS / dims[0], B_COLS / dims[1], B_COLS,
@@ -103,8 +103,11 @@ void gather_blocks(Mat *A, Mat *B, Mat *C, Mat *C_block, MPI_Comm comm_2d,
 
 
 void mat_mul(Mat *A, Mat *B, Mat *result) {
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+//    int rank;
+//    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+//    if (rank == 1) {
+//        print_matrix(B);
+//    }
     //Multiplication of rows of matrices corresponding to processes by a vector
     for (int i = 0; i < result->rows; i++) {
         for (int j = 0; j < result->cols; j++) {
@@ -172,7 +175,7 @@ void matrix_calculation(Mat *A, Mat *B, Mat *C) {
 
     if (rank_column == 0) {
         MPI_Scatter(
-                /* send buffer */ rank == 0 ? B->data : &rank,
+                /* send buffer */ rank == 0 ? B->data : NULL,
                 /* number of <send data type> elements sent */ 1,
                 /* send data type */ vertical_int_slice_resized,
                 /* recv buffer */ B_block->data,
@@ -188,9 +191,10 @@ void matrix_calculation(Mat *A, Mat *B, Mat *C) {
     MPI_Type_commit(&horizontal_int_slice);
 
     if (rank_row == 0) {
-        MPI_Scatter(A->data, 1, horizontal_int_slice, A_block->data,
+        MPI_Scatter(rank == 0 ? A->data: NULL, 1, horizontal_int_slice, A_block->data,
                     A_B_STRIP * rows_per_process, MPI_DOUBLE, RANK_ROOT, comm_columns);
     }
+
     MPI_Bcast(B_block->data, A_B_STRIP * columns_per_process, MPI_DOUBLE, RANK_ROOT,
               comm_columns);
     MPI_Bcast(A_block->data, A_B_STRIP * rows_per_process, MPI_DOUBLE, RANK_ROOT,
@@ -198,7 +202,7 @@ void matrix_calculation(Mat *A, Mat *B, Mat *C) {
 
     mat_mul(A_block, B_block, C_block);
     //sleep(1 + rank);
-    gather_blocks(A, B, C, C_block, comm_2d, dims, coords, process_num);
+    gather_blocks(C, C_block, comm_2d, dims, coords, process_num);
 
     MPI_Type_free(&vertical_int_slice_resized);
     MPI_Type_free(&vertical_int_slice);
