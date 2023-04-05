@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <assert.h>
 
 #define RANK_ROOT 0
 #define A_ROWS 1200
@@ -13,6 +14,14 @@ typedef struct {
     int cols;
     int rows;
 } Mat;
+
+Mat *init_null(void) {
+    Mat *new_mat = malloc(sizeof(Mat));
+    new_mat->data = NULL;
+    new_mat->rows = 0;
+    new_mat->cols = 0;
+    return new_mat;
+}
 
 Mat *init_matrix(int rows, int cols) {
     Mat *new_mat = malloc(sizeof(Mat));
@@ -68,28 +77,29 @@ void make_null(Mat *C) {
 }
 
 void gather_blocks(Mat *C, Mat *C_block, MPI_Comm comm_2d,
-                  const int *dims, int *coords, int process_num) {
+                   int grid_columns, int grid_rows, int process_num) {
+
     MPI_Datatype block, block_resized;
-    MPI_Type_vector(A_ROWS / dims[1], B_COLS / dims[0], B_COLS,
+    MPI_Type_vector(A_ROWS / grid_rows, B_COLS / grid_columns, B_COLS,
                     MPI_DOUBLE, &block);
     MPI_Type_commit(&block);
-    MPI_Type_create_resized(block, 0, (int) (B_COLS / dims[0] * sizeof(double)),
+    MPI_Type_create_resized(block, 0, (int) (B_COLS / grid_columns * sizeof(double)),
                             &block_resized);
     MPI_Type_commit(&block_resized);
 
     int *recv_counts = calloc(process_num, sizeof(int));
     int *displs = calloc(process_num, sizeof(int));
+    int coords[2] = {0, 0};
     for (int i = 0; i < process_num; ++i) {
         recv_counts[i] = 1;
         MPI_Cart_coords(comm_2d, i, 2, coords);
-        displs[i] = dims[0] * (A_ROWS / dims[1]) * coords[1] + coords[0];
+        displs[i] = grid_columns * (A_ROWS / grid_rows) * coords[1] + coords[0];
     }
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
     MPI_Gatherv(C_block->data,
-                A_ROWS * B_COLS / (dims[0] * dims[1]),
+                A_ROWS * B_COLS / (grid_columns * grid_rows),
                 MPI_DOUBLE,
-                rank == 0 ? C->data : NULL,
+                C->data,
                 recv_counts,
                 displs,
                 block_resized,
@@ -101,39 +111,14 @@ void gather_blocks(Mat *C, Mat *C_block, MPI_Comm comm_2d,
     free(displs);
 }
 
-
-void mat_mul(Mat *A, Mat *B, Mat *result) {
-    //Multiplication of rows of matrices corresponding to processes by a vector
-    for (int i = 0; i < result->rows; i++) {
-        for (int j = 0; j < result->cols; j++) {
-            result->data[i * B->cols + j] = 0;
-            for (int k = 0; k < A->cols; k++) {
-                result->data[i * B->cols + j] += A->data[i * A->cols + k] * B->data[k * B->cols + j];
-            }
-        }
-    }
-}
-
-void matrix_calculation(Mat *A, Mat *B, Mat *C) {
-    int dims[2] = {0, 0}, periods[2] = {0, 0}, coords[2] = {0, 0}, reorder = 0;
-    int process_num, rank, grid_columns, grid_rows;
-    int rank_row, rank_column;
-
-    //communicators 2d, on rows and columns.
-    MPI_Comm comm_2d;
+void mat_distribution(MPI_Comm comm_2d, Mat *A, Mat *B, Mat *A_block, Mat *B_block, int columns_per_process,
+                      int rows_per_process) {
     MPI_Comm comm_rows;
     MPI_Comm comm_columns;
-    MPI_Comm_size(MPI_COMM_WORLD, &process_num);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int grid_rank, rank_row, rank_column;
+    int coords[2] = {0, 0};
 
-    //Creating grid process_num on 2 dimensions.
-    MPI_Dims_create(process_num, 2, dims);
-    grid_rows = dims[1];
-    grid_columns = dims[0];
-
-    int grid_rank;
     //Creating 2d entity and getting coords for every process.
-    MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, reorder, &comm_2d);
     MPI_Comm_rank(comm_2d, &grid_rank);
     MPI_Cart_coords(comm_2d, grid_rank, 2, coords);
     rank_row = coords[1], rank_column = coords[0];
@@ -142,12 +127,6 @@ void matrix_calculation(Mat *A, Mat *B, Mat *C) {
     MPI_Comm_split(comm_2d, rank_row, rank_column, &comm_columns);
     MPI_Comm_split(comm_2d, rank_column, rank_row, &comm_rows);
 
-    const int columns_per_process = B_COLS / grid_columns;
-    const int rows_per_process = A_ROWS / grid_rows;
-
-    Mat *A_block = init_matrix(rows_per_process, A_B_STRIP);
-    Mat *B_block = init_matrix(A_B_STRIP, columns_per_process);
-    Mat *C_block = init_matrix(rows_per_process, columns_per_process);
 
     MPI_Datatype vertical_int_slice;
     MPI_Datatype vertical_int_slice_resized;
@@ -157,12 +136,20 @@ void matrix_calculation(Mat *A, Mat *B, Mat *C) {
     MPI_Type_commit(&horizontal_int_slice);
 
     if (rank_column == 0) {
-        MPI_Scatter(rank == 0 ? A->data: NULL, 1, horizontal_int_slice,
+        MPI_Scatter(A->data,
+                    1,
+                    horizontal_int_slice,
                     A_block->data,
-                    A_B_STRIP * rows_per_process, MPI_DOUBLE, RANK_ROOT, comm_rows);
+                    A_B_STRIP * rows_per_process,
+                    MPI_DOUBLE,
+                    RANK_ROOT,
+                    comm_rows);
     }
 
-    MPI_Bcast(A_block->data, A_B_STRIP * rows_per_process, MPI_DOUBLE, RANK_ROOT,
+    MPI_Bcast(A_block->data,
+              A_B_STRIP * rows_per_process,
+              MPI_DOUBLE,
+              RANK_ROOT,
               comm_columns);
 
     MPI_Type_vector(
@@ -185,7 +172,7 @@ void matrix_calculation(Mat *A, Mat *B, Mat *C) {
 
     if (rank_row == 0) {
         MPI_Scatter(
-                /* send buffer */ rank == 0 ? B->data : NULL,
+                /* send buffer */ B->data,
                 /* number of <send data type> elements sent */ 1,
                 /* send data type */ vertical_int_slice_resized,
                 /* recv buffer */ B_block->data,
@@ -196,19 +183,60 @@ void matrix_calculation(Mat *A, Mat *B, Mat *C) {
         );
     }
 
-    MPI_Bcast(B_block->data, A_B_STRIP * columns_per_process, MPI_DOUBLE, RANK_ROOT,
+    MPI_Bcast(B_block->data,
+              A_B_STRIP * columns_per_process,
+              MPI_DOUBLE,
+              RANK_ROOT,
               comm_rows);
 
-    mat_mul(A_block, B_block, C_block);
-    //sleep(1 + rank);
-    gather_blocks(C, C_block, comm_2d, dims, coords, process_num);
-
-    MPI_Comm_free(&comm_2d);
     MPI_Comm_free(&comm_columns);
     MPI_Comm_free(&comm_rows);
     MPI_Type_free(&vertical_int_slice_resized);
     MPI_Type_free(&vertical_int_slice);
     MPI_Type_free(&horizontal_int_slice);
+}
+
+void mat_mul(Mat *A, Mat *B, Mat *result) {
+    //Multiplication of rows of matrices corresponding to processes by a vector
+    for (int i = 0; i < result->rows; i++) {
+        for (int j = 0; j < result->cols; j++) {
+            result->data[i * B->cols + j] = 0;
+            for (int k = 0; k < A->cols; k++) {
+                result->data[i * B->cols + j] += A->data[i * A->cols + k] * B->data[k * B->cols + j];
+            }
+        }
+    }
+}
+
+void matrix_calculation(Mat *A, Mat *B, Mat *C) {
+    int dims[2] = {0, 0}, periods[2] = {0, 0}, reorder = 0;
+    int process_num, rank, grid_columns, grid_rows;
+
+    //communicators 2d, on rows and columns.
+    MPI_Comm comm_2d;
+    MPI_Comm_size(MPI_COMM_WORLD, &process_num);
+
+    //Creating grid process_num on 2 dimensions.
+    MPI_Dims_create(process_num, 2, dims);
+    grid_rows = dims[1], grid_columns = dims[0];
+    MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, reorder, &comm_2d);
+
+    assert(B_COLS % grid_columns == 0);
+    const int columns_per_process = B_COLS / grid_columns;
+
+    assert(A_ROWS % grid_rows == 0);
+    const int rows_per_process = A_ROWS / grid_rows;
+
+    Mat *A_block = init_matrix(rows_per_process, A_B_STRIP);
+    Mat *B_block = init_matrix(A_B_STRIP, columns_per_process);
+    Mat *C_block = init_matrix(rows_per_process, columns_per_process);
+
+    mat_distribution(comm_2d, A, B, A_block, B_block, columns_per_process, rows_per_process);
+    mat_mul(A_block, B_block, C_block);
+    //sleep(1 + rank);
+    gather_blocks(C, C_block, comm_2d, grid_columns, grid_rows, process_num);
+
+    MPI_Comm_free(&comm_2d);
     free_matrix(A_block);
     free_matrix(B_block);
     free_matrix(C_block);
@@ -223,9 +251,9 @@ int main(int argc, char *argv[]) {
     }
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     double start_time, end_time;
-    Mat *A = NULL;
-    Mat *B = NULL;
-    Mat *C = NULL;
+    Mat *A = init_null();
+    Mat *B = init_null();
+    Mat *C = init_null();
     if (RANK_ROOT == rank) {
         A = init_matrix(A_ROWS, A_B_STRIP);
         B = init_matrix(A_B_STRIP, B_COLS);
