@@ -1,5 +1,5 @@
 #PBS -l select=1:ncpus=4:mpiprocs=4:mem=6000m,place=scatter
-#PBS -l walltime=00:01:00
+#PBS -l walltime=00:06:00
 #PBS -m n
 #PBS -o out-lab3.txt
 #PBS -e err-lab3.txt
