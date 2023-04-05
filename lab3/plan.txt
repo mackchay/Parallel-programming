@@ -4,4 +4,6 @@ Multiplication matrices algorithm with using 2d grid plan:
 2. Init matrix entity (i'm using Mpi_cart_create).
 3. Split the matrix into processes row by row.
 4. Split the matrix into processes column by column.
-5.
+5. Scatter matrix to 0 index columns and row
+6. Broadcast to other processes.
+7. Gather all pieces in full matrix.
