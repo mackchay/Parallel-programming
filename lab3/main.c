@@ -4,9 +4,9 @@
 #include <unistd.h>
 
 #define RANK_ROOT 0
-#define A_ROWS 4
-#define A_B_STRIP 6
-#define B_COLS 8
+#define A_ROWS 1200
+#define A_B_STRIP 2400
+#define B_COLS 1800
 
 typedef struct {
     double *data;
@@ -70,10 +70,10 @@ void make_null(Mat *C) {
 void gather_blocks(Mat *C, Mat *C_block, MPI_Comm comm_2d,
                   const int *dims, int *coords, int process_num) {
     MPI_Datatype block, block_resized;
-    MPI_Type_vector(A_ROWS / dims[0], B_COLS / dims[1], B_COLS,
+    MPI_Type_vector(A_ROWS / dims[1], B_COLS / dims[0], B_COLS,
                     MPI_DOUBLE, &block);
     MPI_Type_commit(&block);
-    MPI_Type_create_resized(block, 0, (int) (B_COLS / dims[1] * sizeof(double)),
+    MPI_Type_create_resized(block, 0, (int) (B_COLS / dims[0] * sizeof(double)),
                             &block_resized);
     MPI_Type_commit(&block_resized);
 
@@ -82,7 +82,7 @@ void gather_blocks(Mat *C, Mat *C_block, MPI_Comm comm_2d,
     for (int i = 0; i < process_num; ++i) {
         recv_counts[i] = 1;
         MPI_Cart_coords(comm_2d, i, 2, coords);
-        displs[i] = dims[1] * (A_ROWS / dims[0]) * coords[1] + coords[0];
+        displs[i] = dims[0] * (A_ROWS / dims[1]) * coords[1] + coords[0];
     }
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -103,11 +103,6 @@ void gather_blocks(Mat *C, Mat *C_block, MPI_Comm comm_2d,
 
 
 void mat_mul(Mat *A, Mat *B, Mat *result) {
-//    int rank;
-//    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-//    if (rank == 1) {
-//        print_matrix(B);
-//    }
     //Multiplication of rows of matrices corresponding to processes by a vector
     for (int i = 0; i < result->rows; i++) {
         for (int j = 0; j < result->cols; j++) {
@@ -120,7 +115,7 @@ void mat_mul(Mat *A, Mat *B, Mat *result) {
 }
 
 void matrix_calculation(Mat *A, Mat *B, Mat *C) {
-    int dims[2] = {0, 0}, periods[2] = {0, 0}, coords[2], reorder = 1;
+    int dims[2] = {0, 0}, periods[2] = {0, 0}, coords[2] = {0, 0}, reorder = 0;
     int process_num, rank, grid_columns, grid_rows;
     int rank_row, rank_column;
 
@@ -133,13 +128,15 @@ void matrix_calculation(Mat *A, Mat *B, Mat *C) {
 
     //Creating grid process_num on 2 dimensions.
     MPI_Dims_create(process_num, 2, dims);
-    grid_rows = dims[0];
-    grid_columns = dims[1];
+    grid_rows = dims[1];
+    grid_columns = dims[0];
 
+    int grid_rank;
     //Creating 2d entity and getting coords for every process.
     MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, reorder, &comm_2d);
-    MPI_Cart_get(comm_2d, 2, dims, periods, coords);
-    rank_row = coords[0], rank_column = coords[1];
+    MPI_Comm_rank(comm_2d, &grid_rank);
+    MPI_Cart_coords(comm_2d, grid_rank, 2, coords);
+    rank_row = coords[1], rank_column = coords[0];
 
     //Getting groups by same row or same column.
     MPI_Comm_split(comm_2d, rank_row, rank_column, &comm_columns);
@@ -155,6 +152,18 @@ void matrix_calculation(Mat *A, Mat *B, Mat *C) {
     MPI_Datatype vertical_int_slice;
     MPI_Datatype vertical_int_slice_resized;
     MPI_Datatype horizontal_int_slice;
+
+    MPI_Type_contiguous(A_B_STRIP * rows_per_process, MPI_DOUBLE, &horizontal_int_slice);
+    MPI_Type_commit(&horizontal_int_slice);
+
+    if (rank_column == 0) {
+        MPI_Scatter(rank == 0 ? A->data: NULL, 1, horizontal_int_slice,
+                    A_block->data,
+                    A_B_STRIP * rows_per_process, MPI_DOUBLE, RANK_ROOT, comm_rows);
+    }
+
+    MPI_Bcast(A_block->data, A_B_STRIP * rows_per_process, MPI_DOUBLE, RANK_ROOT,
+              comm_columns);
 
     MPI_Type_vector(
             /* blocks count - number of columns */ A_B_STRIP,
@@ -173,7 +182,8 @@ void matrix_calculation(Mat *A, Mat *B, Mat *C) {
     );
     MPI_Type_commit(&vertical_int_slice_resized);
 
-    if (rank_column == 0) {
+
+    if (rank_row == 0) {
         MPI_Scatter(
                 /* send buffer */ rank == 0 ? B->data : NULL,
                 /* number of <send data type> elements sent */ 1,
@@ -182,28 +192,20 @@ void matrix_calculation(Mat *A, Mat *B, Mat *C) {
                 /* number of <recv data type> elements received */ A_B_STRIP * columns_per_process,
                 /* recv data type */ MPI_DOUBLE,
                                   RANK_ROOT,
-                                  comm_rows
+                                  comm_columns
         );
     }
 
-
-    MPI_Type_contiguous(A_B_STRIP * rows_per_process, MPI_DOUBLE, &horizontal_int_slice);
-    MPI_Type_commit(&horizontal_int_slice);
-
-    if (rank_row == 0) {
-        MPI_Scatter(rank == 0 ? A->data: NULL, 1, horizontal_int_slice, A_block->data,
-                    A_B_STRIP * rows_per_process, MPI_DOUBLE, RANK_ROOT, comm_columns);
-    }
-
     MPI_Bcast(B_block->data, A_B_STRIP * columns_per_process, MPI_DOUBLE, RANK_ROOT,
-              comm_columns);
-    MPI_Bcast(A_block->data, A_B_STRIP * rows_per_process, MPI_DOUBLE, RANK_ROOT,
               comm_rows);
 
     mat_mul(A_block, B_block, C_block);
     //sleep(1 + rank);
     gather_blocks(C, C_block, comm_2d, dims, coords, process_num);
 
+    MPI_Comm_free(&comm_2d);
+    MPI_Comm_free(&comm_columns);
+    MPI_Comm_free(&comm_rows);
     MPI_Type_free(&vertical_int_slice_resized);
     MPI_Type_free(&vertical_int_slice);
     MPI_Type_free(&horizontal_int_slice);
