@@ -5,9 +5,9 @@
 #include <assert.h>
 
 #define RANK_ROOT 0
-#define A_ROWS 1200
-#define A_B_STRIP 2400
-#define B_COLS 1800
+#define A_ROWS 24
+#define A_B_STRIP 24
+#define B_COLS 24
 
 typedef struct {
     double *data;
@@ -210,7 +210,7 @@ void mat_mul(Mat *A, Mat *B, Mat *result) {
 
 void matrix_calculation(Mat *A, Mat *B, Mat *C) {
     int dims[2] = {0, 0}, periods[2] = {0, 0}, reorder = 0;
-    int process_num, rank, grid_columns, grid_rows;
+    int process_num, grid_columns, grid_rows;
 
     //communicators 2d, on rows and columns.
     MPI_Comm comm_2d;
