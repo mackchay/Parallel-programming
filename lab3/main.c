@@ -5,9 +5,9 @@
 #include <assert.h>
 
 #define RANK_ROOT 0
-#define A_ROWS 24
-#define A_B_STRIP 24
-#define B_COLS 24
+#define A_ROWS 3200
+#define A_B_STRIP 3200
+#define B_COLS 3200
 
 typedef struct {
     double *data;
@@ -199,83 +199,82 @@ void mat_distribution(MPI_Comm comm_2d, Mat *A, Mat *B, Mat *A_block, Mat *B_blo
 void mat_mul(Mat *A, Mat *B, Mat *result) {
     //Multiplication of rows of matrices corresponding to processes by a vector
     for (int i = 0; i < result->rows; i++) {
-        for (int j = 0; j < result->cols; j++) {
-            result->data[i * B->cols + j] = 0;
-            for (int k = 0; k < A->cols; k++) {
+        for (int k = 0; k < A->cols; k++) {
+            for (int j = 0; j < result->cols; j++) {
                 result->data[i * B->cols + j] += A->data[i * A->cols + k] * B->data[k * B->cols + j];
             }
         }
     }
 }
 
-void matrix_calculation(Mat *A, Mat *B, Mat *C) {
-    int dims[2] = {0, 0}, periods[2] = {0, 0}, reorder = 0;
-    int process_num, grid_columns, grid_rows;
+    void matrix_calculation(Mat *A, Mat *B, Mat *C) {
+        int dims[2] = {0, 0}, periods[2] = {0, 0}, reorder = 0;
+        int process_num, grid_columns, grid_rows;
 
-    //communicators 2d, on rows and columns.
-    MPI_Comm comm_2d;
-    MPI_Comm_size(MPI_COMM_WORLD, &process_num);
+        //communicators 2d, on rows and columns.
+        MPI_Comm comm_2d;
+        MPI_Comm_size(MPI_COMM_WORLD, &process_num);
 
-    //Creating grid process_num on 2 dimensions.
-    MPI_Dims_create(process_num, 2, dims);
-    grid_rows = dims[1], grid_columns = dims[0];
-    MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, reorder, &comm_2d);
+        //Creating grid process_num on 2 dimensions.
+        MPI_Dims_create(process_num, 2, dims);
+        grid_rows = dims[1], grid_columns = dims[0];
+        MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, reorder, &comm_2d);
 
-    assert(B_COLS % grid_columns == 0);
-    const int columns_per_process = B_COLS / grid_columns;
+        assert(B_COLS % grid_columns == 0);
+        const int columns_per_process = B_COLS / grid_columns;
 
-    assert(A_ROWS % grid_rows == 0);
-    const int rows_per_process = A_ROWS / grid_rows;
+        assert(A_ROWS % grid_rows == 0);
+        const int rows_per_process = A_ROWS / grid_rows;
 
-    Mat *A_block = init_matrix(rows_per_process, A_B_STRIP);
-    Mat *B_block = init_matrix(A_B_STRIP, columns_per_process);
-    Mat *C_block = init_matrix(rows_per_process, columns_per_process);
+        Mat *A_block = init_matrix(rows_per_process, A_B_STRIP);
+        Mat *B_block = init_matrix(A_B_STRIP, columns_per_process);
+        Mat *C_block = init_matrix(rows_per_process, columns_per_process);
 
-    mat_distribution(comm_2d, A, B, A_block, B_block, columns_per_process, rows_per_process);
-    mat_mul(A_block, B_block, C_block);
-    //sleep(1 + rank);
-    gather_blocks(C, C_block, comm_2d, grid_columns, grid_rows, process_num);
+        mat_distribution(comm_2d, A, B, A_block, B_block, columns_per_process, rows_per_process);
+        mat_mul(A_block, B_block, C_block);
+        //sleep(1 + rank);
+        gather_blocks(C, C_block, comm_2d, grid_columns, grid_rows, process_num);
 
-    MPI_Comm_free(&comm_2d);
-    free_matrix(A_block);
-    free_matrix(B_block);
-    free_matrix(C_block);
-}
-
-int main(int argc, char *argv[]) {
-
-    int err_code, rank;
-    err_code = MPI_Init(&argc, &argv);
-    if (err_code != 0) {
-        return err_code;
+        MPI_Comm_free(&comm_2d);
+        free_matrix(A_block);
+        free_matrix(B_block);
+        free_matrix(C_block);
     }
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    double start_time, end_time;
-    Mat *A = init_null();
-    Mat *B = init_null();
-    Mat *C = init_null();
-    if (RANK_ROOT == rank) {
-        A = init_matrix(A_ROWS, A_B_STRIP);
-        B = init_matrix(A_B_STRIP, B_COLS);
-        C = init_matrix(A_ROWS, B_COLS);
-        fill_matrix(A, B);
-    }
-    for (int i = 0; i < 5; i++) {
-        start_time = MPI_Wtime();
-        matrix_calculation(A, B, C);
-        end_time = MPI_Wtime();
-        if (RANK_ROOT == rank) {
-            printf("Time proceeds: %lf\n", end_time - start_time);
-            print_matrix(C);
-            make_null(C);
+
+    int main(int argc, char *argv[]) {
+
+        int err_code, rank;
+        err_code = MPI_Init(&argc, &argv);
+        if (err_code != 0) {
+            return err_code;
         }
-    }
-    if (RANK_ROOT == rank) {
-        free_matrix(A);
-        free_matrix(B);
-        free_matrix(C);
-    }
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        double start_time, end_time;
+        Mat *A = init_null();
+        Mat *B = init_null();
+        Mat *C = init_null();
+        if (RANK_ROOT == rank) {
+            A = init_matrix(A_ROWS, A_B_STRIP);
+            B = init_matrix(A_B_STRIP, B_COLS);
+            C = init_matrix(A_ROWS, B_COLS);
+            fill_matrix(A, B);
+        }
+        for (int i = 0; i < 5; i++) {
+            start_time = MPI_Wtime();
+            matrix_calculation(A, B, C);
+            end_time = MPI_Wtime();
+            if (RANK_ROOT == rank) {
+                printf("Time proceeds: %lf\n", end_time - start_time);
+//                print_matrix(C);
+                make_null(C);
+            }
+        }
+        if (RANK_ROOT == rank) {
+            free_matrix(A);
+            free_matrix(B);
+            free_matrix(C);
+        }
 
-    MPI_Finalize();
-    return 0;
-}
+        MPI_Finalize();
+        return 0;
+    }
