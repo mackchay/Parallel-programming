@@ -2,9 +2,10 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <mpi.h>
+#include <math.h>
 
-#define a 100000
-#define e 0.00000001
+#define A 100000
+#define EPSILON 0.00000001
 
 #define MIN -1
 #define MAX 1
@@ -122,8 +123,33 @@ void init_fun(Grid grid, Function fun) {
     }
 }
 
-void calculateFun(void) {
+double grid_calculation(Grid grid, int i, int j, int k) {
+    const double x = index_x(grid, i);
+    const double y = index_y(grid, j);
+    const double z = index_z(grid, k);
+    const double h = grid.D / (double) (grid.N - 1);
+    double hx_sq, hy_sq, hz_sq;
+    hx_sq = hy_sq = hz_sq = h * h;
+    const double c = 1 / (A + 2 / hx_sq + 2 / hy_sq + 2 / hz_sq);
+    const double x_part = (*grid_at(grid, i - 1, j, k) + *grid_at(grid, i + 1, j, k));
+    const double y_part = (*grid_at(grid, i, j - 1, k) + *grid_at(grid, i, j - 1, k));
+    const double z_part = (*grid_at(grid, i, j, k - 1) + *grid_at(grid, i, j, k + 1));
+    return c * (x_part + y_part + z_part);
+}
 
+void solve(Grid grid) {
+    double delta = INFINITY;
+    int iter = 0;
+    while (delta < EPSILON && iter < 20) {
+        for (int i = grid.lower_edge + 1; i < grid.upper_edge; i++) {
+            for (int j = grid.lower_edge + 1; j < grid.upper_edge; j++) {
+                for (int k = grid.lower_edge + 1; k < grid.upper_edge; k++) {
+                    double old_value = *grid_at(grid, i, j, k);
+                    double new_value = grid_calculation(grid, i, j, k);
+                }
+            }
+        }
+    }
 }
 
 int main(void) {
