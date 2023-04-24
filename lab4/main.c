@@ -7,8 +7,12 @@
 
 #define A 100000
 #define EPSILON 0.00000001
-#define REAL_SIZE 2
-#define SIZE 51
+#define D_X 2
+#define D_Y 2
+#define D_Z 2
+#define N_X 6
+#define N_Y 6
+#define N_Z 6
 #define MAX 1
 
 typedef struct {
@@ -119,7 +123,7 @@ double ro(double x, double y, double z) {
     return 6 - phi(x, y, z);
 }
 
-float grid_max_diff(
+double grid_max_diff(
         Grid grid,
         Function target) {
     double delta = 0.0f;
@@ -195,28 +199,78 @@ double grid_calculation(Grid grid, int i, int j, int k) {
 }
 
 void solve(Grid grid) {
+    int proc_rank, proc_num;
+    MPI_Comm_rank(MPI_COMM_WORLD, &proc_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &proc_num);
+    MPI_Request req[4];
     double delta = INFINITY;
     int iter = 0;
+    int layer_size = N_X / proc_num;
+    int layer_x_coordinate = proc_rank * layer_size;
 
     Grid next = grid_copy(grid);
     while (delta > EPSILON && iter < 20) {
         printf("n_iter = %d\niter_delta = %.8f\n", iter, delta);
         grid_print(grid);
         printf("\n");
+        double delta_max = 0;
+        if (proc_rank != 0) {
+            MPI_Isend(grid_at(grid, layer_x_coordinate, grid.upper_edge, grid.upper_edge),
+                      N_Y * N_Z,
+                      MPI_DOUBLE,
+                      proc_rank - 1,
+                      1,
+                      MPI_COMM_WORLD,
+                      &req[0]);
+            MPI_Irecv(grid_at(grid, layer_x_coordinate, grid.upper_edge, grid.upper_edge),
+                      grid.upper_edge * grid.upper_edge,
+                      MPI_DOUBLE,
+                      proc_rank - 1,
+                      1,
+                      MPI_COMM_WORLD,
+                      &req[1]);
+        }
 
-        for (int i = grid.lower_edge + 1; i < grid.upper_edge; i++) {
+        if (proc_rank != proc_num - 1) {
+            MPI_Isend(grid_at(grid, layer_x_coordinate + layer_size, N_Y, N_Z),
+                      grid.upper_edge * grid.upper_edge,
+                      MPI_DOUBLE,
+                      proc_rank + 1,
+                      1,
+                      MPI_COMM_WORLD,
+                      &req[2]);
+            MPI_Irecv(grid_at(grid, layer_x_coordinate + layer_size, grid.upper_edge, grid.upper_edge),
+                      N_Y * N_Z,
+                      MPI_DOUBLE,
+                      proc_rank + 1,
+                      1,
+                      MPI_COMM_WORLD,
+                      &req[3]);
+        }
+        for (int i = grid.lower_edge + 1; i < N_X / proc_num; i++) {
             for (int j = grid.lower_edge + 1; j < grid.upper_edge; j++) {
                 for (int k = grid.lower_edge + 1; k < grid.upper_edge; k++) {
                     double old_value = *grid_at(grid, i, j, k);
                     double new_value = grid_calculation(grid, i, j, k);
                     const double tmp_delta = new_value - old_value;
                     *grid_at(next, i, j, k) = new_value;
-                    delta = fmax(tmp_delta, delta);
+                    delta_max = fmax(tmp_delta, delta_max);
                 }
             }
         }
+
+        if (proc_rank != proc_num - 1) {
+            MPI_Wait(&req[2], MPI_STATUS_IGNORE);
+            MPI_Wait(&req[3], MPI_STATUS_IGNORE);
+        }
+        if (proc_rank != 0) {
+            MPI_Wait(&req[0], MPI_STATUS_IGNORE);
+            MPI_Wait(&req[1], MPI_STATUS_IGNORE);
+        }
+
         grid_swap(&grid, &next);
         iter++;
+        delta = delta_max;
         printf("iter = %d\n", iter);
     }
 }
@@ -227,15 +281,15 @@ int main(void) {
     MPI_Comm_size(MPI_COMM_WORLD, &proc_num);
     MPI_Comm_rank(MPI_COMM_WORLD, &proc_rank);
 
-    int layer_size = SIZE / proc_num;
-    int layer_z_coordinate = proc_rank * layer_size - 1;
+    int layer_size = N_X / proc_num;
+    int layer_x_coordinate = proc_rank * layer_size;
 
-    if (SIZE % proc_num && proc_rank == 0) {
-        printf("Grid size %d should be divisible by the ProcNum \n", SIZE);
+    if (N_X % proc_num && proc_rank == 0) {
+        printf("Grid size %d should be divisible by the proc_num \n", N_X);
         return 0;
     }
 
-    Grid grid = grid_new(SIZE, -MAX, -MAX, layer_z_coordinate, REAL_SIZE);
+    Grid grid = grid_new(N_X, -MAX + layer_x_coordinate, -MAX, -MAX, D_X);
 
     Function fun = phi;
     init_fun(grid, fun);
