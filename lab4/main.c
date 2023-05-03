@@ -1,159 +1,196 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <assert.h>
-#include <mpi.h>
-#include <math.h>
+#include<mpi.h>
+#include<math.h>
+#include<stdio.h>
+#include<float.h>
+#include<malloc.h>
+#include<string.h>
 
-#define A 100000
-#define EPSILON 0.00000001
+#define N_X 480
+#define N_Y 480
+#define N_Z 480
+#define A 10e5
+#define EPSILON 10e-8
+#define D_X 2
+#define D_Y 2
+#define D_Z 2
+#define X_0 -1
+#define Y_0 -1
+#define Z_0 -1
+#define RANK_ROOT 0
 
-#define MIN -1
-#define MAX 1
+#define index(i, j, k) N_X * N_Y * i + N_Y * j + k
 
-typedef struct {
-    double *values;
-    int N;
-    double x0;
-    double y0;
-    double z0;
-    double D;
-    int lower_edge;
-    int upper_edge;
-} Grid;
-
-typedef double (*Function)(
-        double x,
-        double y,
-        double z
-);
-
-typedef double (*GridFunction)(
-        Grid grid,
-        int i,
-        int j,
-        int k
-);
-
-
-Grid grid_new(
-        int size,
-        double x0,
-        double y0,
-        double z0,
-        int real_size) {
-    assert(size >= 1 && "Size must be >= 1");
-
-    double * const data = (double *const) (float *) calloc(size * size * size, sizeof(*data));
-
-    return (Grid) {
-            .values = data,
-            .N = size,
-            .x0 = x0,
-            .y0 = y0,
-            .z0 = z0,
-            .D = real_size,
-            .lower_edge = 0,
-            .upper_edge = size - 1,
-    };
-}
-
-
-double * grid_at(
-        Grid grid,
-        int i,
-        int j,
-        int k) {
-    return &grid.values[j * grid.N + i * grid.N + k];
-}
-
-double index_x(
-        Grid grid,
-        int i
-        ) {
-    return grid.x0 + i * grid.D / (grid.N - 1);
-}
-
-double index_y(
-        Grid grid,
-        int j
-) {
-    return grid.y0 + j * grid.D / (grid.N - 1);
-}
-
-double index_z(
-        Grid grid,
-        int k
-) {
-    return grid.z0 + k * grid.D / (grid.N - 1);
-}
-
-double phi(double x, double y, double z) {
-    return x*x + y*y + z*z;
+double fi(double x, double y, double z) {
+    return x * x + y * y + z * z;
 }
 
 double ro(double x, double y, double z) {
-    return 6 - phi(x, y, z);
+    return 6 - A * fi(x, y, z);
 }
 
-void init_fun(Grid grid, Function fun) {
-    double x, y, z;
-    for (int i = 0; i < grid.N; i++) {
-        x = index_x(grid, i);
-        *grid_at(grid, i, grid.lower_edge, grid.lower_edge) = fun(x,
-                                                 index_y(grid, grid.lower_edge),
-                                                 index_z(grid, grid.lower_edge));
-        *grid_at(grid, i, grid.upper_edge, grid.upper_edge) = fun(x,
-                                                                  index_y(grid, grid.upper_edge),
-                                                                  index_z(grid, grid.upper_edge));
-
-        y = index_y(grid, i);
-        *grid_at(grid, grid.lower_edge, i, grid.lower_edge) = fun(index_x(grid, grid.lower_edge),
-                                                                  y,
-                                                                  index_z(grid, grid.lower_edge));
-        *grid_at(grid, grid.upper_edge, i, grid.upper_edge) = fun(index_x(grid, grid.upper_edge),
-                                                                  y,
-                                                                  index_z(grid, grid.upper_edge));
-        z = index_z(grid, i);
-        *grid_at(grid, grid.lower_edge, grid.lower_edge, i) = fun(index_x(grid, grid.lower_edge),
-                                                                  index_y(grid, grid.lower_edge),
-                                                                  z);
-        *grid_at(grid, grid.upper_edge, grid.upper_edge, i) = fun(index_x(grid, grid.upper_edge),
-                                                                  index_y(grid, grid.upper_edge),
-                                                                  z);
-    }
-}
-
-double grid_calculation(Grid grid, int i, int j, int k) {
-    const double x = index_x(grid, i);
-    const double y = index_y(grid, j);
-    const double z = index_z(grid, k);
-    const double h = grid.D / (double) (grid.N - 1);
-    double hx_sq, hy_sq, hz_sq;
-    hx_sq = hy_sq = hz_sq = h * h;
-    const double c = 1 / (A + 2 / hx_sq + 2 / hy_sq + 2 / hz_sq);
-    const double x_part = (*grid_at(grid, i - 1, j, k) + *grid_at(grid, i + 1, j, k));
-    const double y_part = (*grid_at(grid, i, j - 1, k) + *grid_at(grid, i, j - 1, k));
-    const double z_part = (*grid_at(grid, i, j, k - 1) + *grid_at(grid, i, j, k + 1));
-    return c * (x_part + y_part + z_part);
-}
-
-void solve(Grid grid) {
-    double delta = INFINITY;
-    int iter = 0;
-    while (delta < EPSILON && iter < 20) {
-        for (int i = grid.lower_edge + 1; i < grid.upper_edge; i++) {
-            for (int j = grid.lower_edge + 1; j < grid.upper_edge; j++) {
-                for (int k = grid.lower_edge + 1; k < grid.upper_edge; k++) {
-                    double old_value = *grid_at(grid, i, j, k);
-                    double new_value = grid_calculation(grid, i, j, k);
+void initializeLayer(int sizeLayer, double* curLayer, int rank) {
+    for (int i = 0; i < sizeLayer + 2; i++) {
+        int coordZ = i + ((rank * sizeLayer) - 1);
+        double z = Z_0 + coordZ * D_Z / (double)(N_Z - 1);
+        for (int j = 0; j < N_X; j++) {
+            double x = (X_0 + j * D_X / (double)(N_X - 1));
+            for (int k = 0; k < N_Y; k++) {
+                double y = Y_0 + k * D_Y / (double)(N_Y - 1);
+                if (k != 0 && k != N_Y - 1 && j != 0 && j != N_X - 1 && z != Z_0 && z != Z_0 + D_Z) {
+                    curLayer[index(i, j, k)] = -1000;
+                }
+                else {
+                    curLayer[index(i, j, k)] = fi(x, y, z);
                 }
             }
         }
     }
 }
 
-int main(void) {
+void printData(double* data) {
+    for (int i = 0; i < N_Z; i++) {
+        for (int j = 0; j < N_X; j++) {
+            for (int k = 0; k < N_Y; k++) {
+                printf(" %7.4f", data[index(i, j, k)]);
+            }
+            printf(";");
+        }
+        printf("\n");
+    }
+}
 
-    printf("Hello, World!\n");
+double calculateDelta(double* area) {
+    double deltaMax = DBL_MIN;
+    double x, y, z;
+    for(int i = 0; i < N_X; i++) {
+        x = X_0 + i * D_X / (double)(N_X - 1);
+        for (int j = 0; j < N_Y; j++) {
+            y = Y_0 + j * D_Y / (double)(N_Y - 1);
+            for (int k = 0; k < N_Z; k++) {
+                z = Z_0 + k * D_Z / (double)(N_Z - 1);
+                deltaMax = fmax(deltaMax, fabs(area[index(k, i, j)] - fi(x, y, z)));
+            }
+        }
+    }
+    return deltaMax;
+}
+
+double calculateLayer(int coordZ, int layerNumber, double* prevLayer, double* curLayer) {
+    int curCoordZ = coordZ + layerNumber;
+    double deltaMax = DBL_MIN;
+    double x, y, z;
+
+    if (curCoordZ == 0 || curCoordZ == N_Z - 1) {
+        memcpy(curLayer + layerNumber * N_X * N_Y, prevLayer + layerNumber * N_X * N_Y, N_X * N_Y * sizeof(double));
+        deltaMax = 0;
+    }
+    else {
+        z = Z_0 + curCoordZ * D_Z / (double)(N_Z - 1);
+        for (int i = 0; i < N_X; i++) {
+            x = X_0 + i * D_X / (double)(N_X - 1);
+            for (int j = 0; j < N_Y; j++) {
+                y = Y_0 + j * D_Y / (double)(N_Y - 1);
+                if (i == 0 || i == N_X - 1 || j == 0 || j == N_Y - 1) {
+                    curLayer[index(layerNumber, i, j)] = prevLayer[index(layerNumber, i, j)];
+                }
+                else {
+                    double H_X = D_X / (double)(N_X - 1);
+                    double H_Y = D_Y / (double)(N_Y - 1);
+                    double H_Z = D_Z / (double)(N_Z - 1);
+                    curLayer[index(layerNumber, i, j)] =
+                            ((prevLayer[index(layerNumber + 1, i, j)] + prevLayer[index(layerNumber - 1, i, j)]) / (H_Z * H_Z) +
+                             (prevLayer[index(layerNumber, i + 1, j)] + prevLayer[index(layerNumber, i - 1, j)]) / (H_X * H_X) +
+                             (prevLayer[index(layerNumber, i, j + 1)] + prevLayer[index(layerNumber, i, j - 1)]) / (H_Y * H_Y) -
+                             ro(x, y, z)) / (2 / (H_X * H_X) + 2 / (H_Y * H_Y) + 2 / (H_Z * H_Z) + A);
+
+                    if (fabs(curLayer[index(layerNumber, i, j)] - prevLayer[index(layerNumber, i, j)]) > deltaMax)
+                        deltaMax = curLayer[index(layerNumber, i, j)] - prevLayer[index(layerNumber, i, j)];
+                }
+            }
+        }
+    }
+    return deltaMax;
+}
+
+int main(int argc, char* argv[]) {
+    int size = 0;
+    int rank = 0;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Request req[4];
+
+    if ((N_X % size || N_Y % size || N_Z % size) && rank == 0) {
+        printf("Error size\n");
+        return 0;
+    }
+
+    double* area = NULL;
+    double globalMaxDelta = DBL_MAX;
+    int layerSize = N_Z / size;
+    int layerZCoord = rank * layerSize - 1;
+
+    int usedLayerSize = (layerSize + 2) * N_X * N_Y;
+    double* prevLayer = (double*)malloc(usedLayerSize * sizeof(double));
+    double* curLayer = (double*)malloc(usedLayerSize * sizeof(double));
+    initializeLayer(layerSize, prevLayer, rank);
+
+    double start = MPI_Wtime();
+    while (globalMaxDelta > EPSILON) {
+        double procMaxDelta = DBL_MIN;
+        double tmpMaxDelta;
+
+        if (rank != 0) {
+            MPI_Isend(curLayer + N_X * N_Y, N_X * N_Y, MPI_DOUBLE,
+                      rank - 1, 1, MPI_COMM_WORLD, &req[1]);
+            MPI_Irecv(curLayer, N_X * N_Y, MPI_DOUBLE,
+                      rank - 1, 1, MPI_COMM_WORLD, &req[0]);
+        }
+        if (rank != size - 1) {
+            MPI_Isend(curLayer + N_X * N_Y * layerSize, N_X * N_Y, MPI_DOUBLE,
+                      rank + 1, 1, MPI_COMM_WORLD, &req[3]);
+            MPI_Irecv(curLayer + N_X * N_Y * (layerSize + 1), N_X * N_Y, MPI_DOUBLE,
+                      rank + 1, 1, MPI_COMM_WORLD, &req[2]);
+        }
+
+        for (int i = 2; i < layerSize; i++) {
+            tmpMaxDelta = calculateLayer(layerZCoord, i, prevLayer, curLayer);
+            procMaxDelta = fmax(procMaxDelta, tmpMaxDelta);
+        }
+
+        if (rank != size - 1) {
+            MPI_Wait(&req[2], MPI_STATUS_IGNORE);
+            MPI_Wait(&req[3], MPI_STATUS_IGNORE);
+        }
+        if (rank != 0) {
+            MPI_Wait(&req[0], MPI_STATUS_IGNORE);
+            MPI_Wait(&req[1], MPI_STATUS_IGNORE);
+        }
+        tmpMaxDelta = calculateLayer(layerZCoord, 1, prevLayer, curLayer);
+        procMaxDelta = fmax(procMaxDelta, tmpMaxDelta);
+
+        tmpMaxDelta = calculateLayer(layerZCoord, layerSize, prevLayer, curLayer);
+        procMaxDelta = fmax(procMaxDelta, tmpMaxDelta);
+
+        memcpy(prevLayer, curLayer, usedLayerSize * sizeof(double));
+        MPI_Allreduce(&procMaxDelta, &globalMaxDelta, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+
+    }
+
+    double end = MPI_Wtime();
+    if (RANK_ROOT == rank)
+        area = (double *)malloc(N_X * N_Y * N_Z * sizeof(double));
+
+    MPI_Gather(prevLayer + N_X * N_Y, layerSize * N_X * N_Y, MPI_DOUBLE, area, layerSize * N_X * N_Y, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    if (RANK_ROOT == rank) {
+        printf("Time taken: %10.5f\n", end - start);
+        printf("Max delta: %10.5f\n", calculateDelta(area));
+        if (area != NULL)
+            free(area);
+    }
+
+    free(curLayer);
+    free(prevLayer);
+    MPI_Finalize();
     return 0;
 }
