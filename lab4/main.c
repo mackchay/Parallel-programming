@@ -5,9 +5,9 @@
 #include<malloc.h>
 #include<string.h>
 
-#define N_X 480
-#define N_Y 480
-#define N_Z 480
+#define N_X 640
+#define N_Y 640
+#define N_Z 640
 #define A 10e5
 #define EPSILON 10e-8
 #define D_X 2
@@ -135,10 +135,14 @@ int main(int argc, char* argv[]) {
     double* curLayer = (double*)malloc(usedLayerSize * sizeof(double));
     initializeLayer(layerSize, prevLayer, rank);
 
+    int iter = 0;
     double start = MPI_Wtime();
     while (globalMaxDelta > EPSILON) {
         double procMaxDelta = DBL_MIN;
         double tmpMaxDelta;
+        iter++;
+        printf("iter: %d\n", iter);
+
 
         if (rank != 0) {
             MPI_Isend(curLayer + N_X * N_Y, N_X * N_Y, MPI_DOUBLE,
