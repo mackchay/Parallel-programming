@@ -6,9 +6,9 @@
 #include <cstring>
 #include <vector>
 
-constexpr int L = 1000;
+constexpr int L = 10;
 constexpr int LISTS_COUNT = 10;
-constexpr int TASK_COUNT = 1000;
+constexpr int TASK_COUNT = 10;
 constexpr int MIN_TASKS_TO_SHARE = 2;
 constexpr int EXECUTOR_FINISHED_WORK = -1;
 constexpr int ASKING_TASK = 888;
@@ -16,7 +16,7 @@ constexpr int SENDING_TASKS = 656;
 constexpr int SENDING_TASK_COUNT = 787;
 constexpr int NO_TASKS_TO_SHARE = -2;
 constexpr int COS_CONST = 10;
-constexpr double PERCENT = static_cast<double>(50) / static_cast<double>(100);
+constexpr double PERCENT = 0.5;
 
 struct GlobalElements {
     int *tasks = nullptr;
@@ -28,9 +28,9 @@ struct GlobalElements {
     int additionalTasks = 0;
 };
 
-pthread_mutex_t mutex;
 GlobalElements globalElements;
-int globalRes;
+pthread_mutex_t mutex;
+double globalRes;
 
 void initTasks(int iter) {
     int processRank, processCount;
@@ -48,8 +48,9 @@ void initTasks(int iter) {
 void executeTasks() {
     pthread_mutex_lock(&mutex);
     while (globalElements.remainingTasks > 0) {
+        int weight = globalElements.tasks[globalElements.remainingTasks - 1];
         pthread_mutex_unlock(&mutex);
-        for (int i = 0; i < globalElements.tasks[globalElements.remainingTasks - 1]; i++) {
+        for (int i = 0; i < weight; i++) {
             globalRes += cos(i * COS_CONST);
         }
         pthread_mutex_lock(&mutex);
@@ -58,7 +59,19 @@ void executeTasks() {
     pthread_mutex_unlock(&mutex);
 }
 
-void askForTasks() {
+void finishWork() {
+    int processRank;
+    pthread_mutex_lock(&mutex);
+    delete [] globalElements.tasks;
+    pthread_mutex_unlock(&mutex);
+    MPI_Comm_rank(MPI_COMM_WORLD, &processRank);
+    int signal = EXECUTOR_FINISHED_WORK;
+    MPI_Send(&signal, 1, MPI_INT, processRank,
+             SENDING_TASK_COUNT, MPI_COMM_WORLD);
+    std::cout << "hello" << std::endl;
+}
+
+bool askForTasks() {
     int processRank, processCount;
     MPI_Status status;
     MPI_Comm_rank(MPI_COMM_WORLD, &processRank);
@@ -68,60 +81,74 @@ void askForTasks() {
         if (process == processRank) {
             continue;
         }
+        pthread_mutex_lock(&mutex);
         MPI_Send(&processRank, 1, MPI_INT, process,
                  ASKING_TASK, MPI_COMM_WORLD);
         MPI_Recv(&receivedTasksCount, 1, MPI_INT, process,
                  SENDING_TASK_COUNT, MPI_COMM_WORLD, &status);
         if (receivedTasksCount != NO_TASKS_TO_SHARE) {
+            memset(globalElements.tasks, 0, TASK_COUNT * sizeof(int));
             MPI_Recv(globalElements.tasks, receivedTasksCount, MPI_INT, process,
                      SENDING_TASKS, MPI_COMM_WORLD, &status);
-            pthread_mutex_lock(&mutex);
             std::cout << "Process " << processRank << " got new tasks." << std::endl;
             globalElements.remainingTasks = receivedTasksCount;
             pthread_mutex_unlock(&mutex);
-            return;
+            return true;
         }
         pthread_mutex_unlock(&mutex);
+        MPI_Barrier(MPI_COMM_WORLD);
     }
-    MPI_Send(&EXECUTOR_FINISHED_WORK, 1, MPI_INT, processRank,
-             SENDING_TASK_COUNT, MPI_COMM_WORLD);
-    std::cout << "hello" << std::endl;
+    finishWork();
+    return false;
 }
 
 void executorThread() {
     for (int iter = 0; iter < LISTS_COUNT; iter++) {
+        MPI_Barrier(MPI_COMM_WORLD);
         initTasks(iter);
         executeTasks();
-        askForTasks();
-        executeTasks();
+        bool isReceived = askForTasks();
+        if (isReceived) {
+            executeTasks();
+        } else {
+            finishWork();
+        }
+        globalRes = 0;
     }
 }
 
 void *receiverThread(void *data) {
-    int processAsking;
+
+    int processAsking, additionalTasks;
+    int taskCountLocal = TASK_COUNT;
     MPI_Status status;
     while (true) {
+        if (globalElements.finishedExecution) {
+            pthread_mutex_unlock(&mutex);
+            break;
+        }
         MPI_Recv(&processAsking, 1, MPI_INT, MPI_ANY_SOURCE,
                  ASKING_TASK, MPI_COMM_WORLD, &status);
         if (processAsking == EXECUTOR_FINISHED_WORK) {
             break;
         }
         pthread_mutex_lock(&mutex);
-        if (globalElements.remainingTasks >= MIN_TASKS_TO_SHARE) {
-            globalElements.additionalTasks = static_cast<int>(globalElements.remainingTasks * PERCENT);
-            globalElements.remainingTasks -= globalElements.additionalTasks;
-            MPI_Send(&globalElements.additionalTasks, 1, MPI_INT, processAsking,
+        if (taskCountLocal >= MIN_TASKS_TO_SHARE) {
+            additionalTasks = static_cast<int>(taskCountLocal * PERCENT);
+            taskCountLocal -= additionalTasks;
+            globalElements.remainingTasks -= additionalTasks;
+            MPI_Send(&additionalTasks, 1, MPI_INT, processAsking,
                      SENDING_TASK_COUNT, MPI_COMM_WORLD);
-            MPI_Send(&globalElements.tasks[globalElements.remainingTasks], globalElements.additionalTasks,
+            MPI_Send(&globalElements.tasks[taskCountLocal], additionalTasks,
                      MPI_INT, processAsking,
                      SENDING_TASKS, MPI_COMM_WORLD);
-            pthread_mutex_unlock(&mutex);
         }
         else {
-            pthread_mutex_unlock(&mutex);
-            MPI_Send(&NO_TASKS_TO_SHARE, 1, MPI_INT, processAsking,
+            additionalTasks = NO_TASKS_TO_SHARE;
+            MPI_Send(&additionalTasks, 1, MPI_INT, processAsking,
                      SENDING_TASK_COUNT, MPI_COMM_WORLD);
         }
+        pthread_mutex_unlock(&mutex);
     }
     pthread_exit(nullptr);
 }
