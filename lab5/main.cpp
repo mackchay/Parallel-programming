@@ -6,7 +6,7 @@
 #include <cstring>
 #include <vector>
 
-constexpr int L = 10;
+constexpr int L = 1000;
 constexpr int LISTS_COUNT = 10;
 constexpr int TASK_COUNT = 10;
 constexpr int MIN_TASKS_TO_SHARE = 2;
@@ -17,6 +17,7 @@ constexpr int SENDING_TASK_COUNT = 787;
 constexpr int NO_TASKS_TO_SHARE = -2;
 constexpr int COS_CONST = 10;
 constexpr double PERCENT = 0.5;
+constexpr double RANK_ROOT = 0;
 
 struct GlobalElements {
     int *tasks = nullptr;
@@ -25,50 +26,54 @@ struct GlobalElements {
 
     int remainingTasks = 0;
     int executedTasks = 0;
-    int additionalTasks = 0;
+    double globalRes = 0;
+    double totalGlobalResult = 0;
 };
 
 GlobalElements globalElements;
 pthread_mutex_t mutex;
-double globalRes;
 
 void initTasks(int iter) {
     int processRank, processCount;
     MPI_Comm_rank(MPI_COMM_WORLD, &processRank);
     MPI_Comm_size(MPI_COMM_WORLD, &processCount);
-    pthread_mutex_lock(&mutex);
     globalElements.tasks = new int[TASK_COUNT];
     globalElements.remainingTasks = TASK_COUNT;
     for (int i = 0; i < globalElements.remainingTasks; i++) {
         globalElements.tasks[i] = abs(50 - i % 100) * abs(processRank - (iter % processCount)) * L;
     }
-    pthread_mutex_unlock(&mutex);
 }
 
 void executeTasks() {
-    pthread_mutex_lock(&mutex);
-    while (globalElements.remainingTasks > 0) {
-        int weight = globalElements.tasks[globalElements.remainingTasks - 1];
-        pthread_mutex_unlock(&mutex);
-        for (int i = 0; i < weight; i++) {
-            globalRes += cos(i * COS_CONST);
-        }
+    int index = 0;
+    while (true) {
         pthread_mutex_lock(&mutex);
+        if (globalElements.remainingTasks > 0) {
+            pthread_mutex_unlock(&mutex);
+            break;
+        }
+        int weight = globalElements.tasks[index];
         globalElements.remainingTasks--;
+        pthread_mutex_unlock(&mutex);
+        index++;
+        for (int i = 0; i < weight; i++) {
+            globalElements.globalRes += cos(i * COS_CONST);
+        }
     }
+    pthread_mutex_lock(&mutex);
+    globalElements.remainingTasks = 0;
     pthread_mutex_unlock(&mutex);
 }
 
 void finishWork() {
-    int processRank;
     pthread_mutex_lock(&mutex);
-    delete [] globalElements.tasks;
+    globalElements.finishedExecution = true;
     pthread_mutex_unlock(&mutex);
+    int processRank;
     MPI_Comm_rank(MPI_COMM_WORLD, &processRank);
     int signal = EXECUTOR_FINISHED_WORK;
     MPI_Send(&signal, 1, MPI_INT, processRank,
              SENDING_TASK_COUNT, MPI_COMM_WORLD);
-    std::cout << "hello" << std::endl;
 }
 
 bool askForTasks() {
@@ -81,40 +86,66 @@ bool askForTasks() {
         if (process == processRank) {
             continue;
         }
-        pthread_mutex_lock(&mutex);
         MPI_Send(&processRank, 1, MPI_INT, process,
                  ASKING_TASK, MPI_COMM_WORLD);
         MPI_Recv(&receivedTasksCount, 1, MPI_INT, process,
                  SENDING_TASK_COUNT, MPI_COMM_WORLD, &status);
-        if (receivedTasksCount != NO_TASKS_TO_SHARE) {
-            memset(globalElements.tasks, 0, TASK_COUNT * sizeof(int));
-            MPI_Recv(globalElements.tasks, receivedTasksCount, MPI_INT, process,
-                     SENDING_TASKS, MPI_COMM_WORLD, &status);
-            std::cout << "Process " << processRank << " got new tasks." << std::endl;
-            globalElements.remainingTasks = receivedTasksCount;
-            pthread_mutex_unlock(&mutex);
-            return true;
+        if (receivedTasksCount == NO_TASKS_TO_SHARE) {
+            continue;
         }
+        memset(globalElements.tasks, 0, TASK_COUNT * sizeof(int));
+        MPI_Recv(globalElements.tasks, receivedTasksCount, MPI_INT, process,
+                 SENDING_TASKS, MPI_COMM_WORLD, &status);
+        pthread_mutex_lock(&mutex);
+        globalElements.remainingTasks = receivedTasksCount;
         pthread_mutex_unlock(&mutex);
-        MPI_Barrier(MPI_COMM_WORLD);
+        executeTasks();
     }
-    finishWork();
     return false;
 }
 
 void executorThread() {
+    double startTime, finishTime, iterDuration, shortestIter, longestIter, currentDisBalance;
+    double localResult, globalDurationResult;
+    int processRank, totalExecutedTasks;
+    MPI_Comm_rank(MPI_COMM_WORLD, &processRank);
     for (int iter = 0; iter < LISTS_COUNT; iter++) {
         MPI_Barrier(MPI_COMM_WORLD);
+        startTime = MPI_Wtime();
         initTasks(iter);
         executeTasks();
-        bool isReceived = askForTasks();
-        if (isReceived) {
-            executeTasks();
-        } else {
-            finishWork();
+        askForTasks();
+        finishTime = MPI_Wtime();
+        iterDuration = finishTime - startTime;
+        MPI_Allreduce(&iterDuration, &longestIter, 1,
+                      MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+        MPI_Allreduce(&iterDuration, &shortestIter, 1,
+                      MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+        MPI_Allreduce(&globalElements.executedTasks, &totalExecutedTasks, 1,
+                      MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+        MPI_Allreduce(&localResult, &globalDurationResult, 1,
+                      MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        currentDisBalance = (longestIter - shortestIter) / longestIter;
+        globalElements.summaryDisBalance += currentDisBalance;
+        globalElements.totalGlobalResult += globalDurationResult;
+//        std::cout << "Sum of square roots on process " << processRank << " is " <<
+//                  globalElements.globalRes << ". Time taken: " <<
+//                  iterDuration << std::endl;
+        if (processRank == RANK_ROOT) {
+            std::cout << "Total executed tasks: " << totalExecutedTasks << std::endl;
+            std::cout << "Max time difference: " << longestIter - shortestIter << std::endl;
+            std::cout << "DisBalance rate is " << currentDisBalance * 100 << "%" << std::endl;
+            std::cout << "Sum of square roots on all processes in iteration " << iter << " is "
+                      << globalElements.summaryDisBalance
+                      << std::endl;
+            std::cout << std::endl;
         }
-        globalRes = 0;
     }
+    if (processRank == RANK_ROOT) {
+        std::cout << "Global result: " << globalElements.totalGlobalResult << std::endl;
+    }
+    finishWork();
 }
 
 void *receiverThread(void *data) {
@@ -123,43 +154,52 @@ void *receiverThread(void *data) {
     int taskCountLocal = TASK_COUNT;
     MPI_Status status;
     while (true) {
+        pthread_mutex_lock(&mutex);
         if (globalElements.finishedExecution) {
             pthread_mutex_unlock(&mutex);
             break;
         }
+        pthread_mutex_unlock(&mutex);
         MPI_Recv(&processAsking, 1, MPI_INT, MPI_ANY_SOURCE,
                  ASKING_TASK, MPI_COMM_WORLD, &status);
         if (processAsking == EXECUTOR_FINISHED_WORK) {
             break;
         }
-        pthread_mutex_lock(&mutex);
         if (taskCountLocal >= MIN_TASKS_TO_SHARE) {
             additionalTasks = static_cast<int>(taskCountLocal * PERCENT);
             taskCountLocal -= additionalTasks;
+            pthread_mutex_lock(&mutex);
             globalElements.remainingTasks -= additionalTasks;
+            pthread_mutex_unlock(&mutex);
             MPI_Send(&additionalTasks, 1, MPI_INT, processAsking,
                      SENDING_TASK_COUNT, MPI_COMM_WORLD);
             MPI_Send(&globalElements.tasks[taskCountLocal], additionalTasks,
                      MPI_INT, processAsking,
                      SENDING_TASKS, MPI_COMM_WORLD);
-        }
-        else {
+        } else {
             additionalTasks = NO_TASKS_TO_SHARE;
             MPI_Send(&additionalTasks, 1, MPI_INT, processAsking,
                      SENDING_TASK_COUNT, MPI_COMM_WORLD);
         }
-        pthread_mutex_unlock(&mutex);
     }
     pthread_exit(nullptr);
 }
 
 int main() {
-    MPI_Init(nullptr, nullptr);
-    pthread_attr_t pthreadAttr;
-    pthread_attr_init(&pthreadAttr);
+    int threadError;
+    MPI_Init_thread(nullptr, nullptr, MPI_THREAD_MULTIPLE, &threadError);
+    if (threadError != MPI_THREAD_MULTIPLE) {
+        MPI_Finalize();
+        return 1;
+    }
+
     pthread_t pthread;
-    pthread_create(&pthread, &pthreadAttr, receiverThread, nullptr);
+    pthread_mutex_init(&mutex, nullptr);
+    pthread_create(&pthread, nullptr, receiverThread, nullptr);
     executorThread();
+    pthread_join(pthread, nullptr);
+    pthread_mutex_destroy(&mutex);
+    delete[] globalElements.tasks;
     MPI_Finalize();
     return 0;
 }
